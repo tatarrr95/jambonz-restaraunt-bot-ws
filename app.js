@@ -118,11 +118,12 @@ const makeService = createEndpoint({ server });
 // Сервис для входящих/исходящих звонков
 const service = makeService({ path: '/restaurant' });
 
-service.on('session:new', async (session) => {
+service.on('session:new', (session) => {
   const callSid = session.call_sid;
   const log = logger.child({ callSid });
 
   log.info('Новый звонок');
+  log.info({ sessionMethods: Object.keys(session) }, 'Доступные методы session');
 
   // Сохраняем логгер в сессии
   session.locals = { logger: log };
@@ -141,6 +142,7 @@ service.on('session:new', async (session) => {
 
     // Пустой транскрипт
     if (!transcript.trim()) {
+      log.info('Пустой транскрипт, просим повторить');
       session
         .say({ text: 'Извините, не расслышал. Повторите, пожалуйста.' })
         .gather({
@@ -156,6 +158,7 @@ service.on('session:new', async (session) => {
 
     // Проверяем на завершение разговора
     if (isEndPhrase(transcript)) {
+      log.info('Завершение разговора по фразе');
       conversations.delete(callSid);
 
       session
@@ -170,6 +173,7 @@ service.on('session:new', async (session) => {
 
     // Проверяем, завершена ли бронь
     if (isBookingConfirmed(aiResponse)) {
+      log.info('Бронь подтверждена');
       conversations.delete(callSid);
 
       session
@@ -182,6 +186,7 @@ service.on('session:new', async (session) => {
     }
 
     // Продолжаем разговор
+    log.info('Отправляем ответ и продолжаем gather');
     session
       .say({ text: aiResponse })
       .gather({
@@ -214,15 +219,12 @@ service.on('session:new', async (session) => {
     log.error({ err }, 'Ошибка сессии');
   });
 
+  // Отправляем приветствие сразу (без await)
+  log.info('Отправляем статическое приветствие');
+
   try {
-    // Получаем приветствие от AI
-    const greeting = await getAIResponse(callSid, null);
-
-    log.info({ greeting }, 'Отправляем приветствие');
-
-    // Отправляем начальное приложение
     session
-      .say({ text: greeting })
+      .say({ text: 'Здравствуйте! Меня зовут Анна из ресторана Золотой Дракон. Хотели бы вы забронировать столик?' })
       .gather({
         input: ['speech'],
         actionHook: '/speech',
@@ -232,9 +234,9 @@ service.on('session:new', async (session) => {
       .hangup()
       .send();
 
+    log.info('Приветствие отправлено');
   } catch (err) {
-    log.error({ err }, 'Ошибка при начале звонка');
-    session.close();
+    log.error({ err }, 'Ошибка при отправке приветствия');
   }
 });
 
