@@ -223,7 +223,18 @@ service.on('session:new', (session) => {
   log.info('Отправляем статическое приветствие');
 
   try {
-    session
+    const result = session
+      .config({
+        synthesizer: {
+          vendor: 'custom:Sber Stream',
+          language: 'ru-RU',
+          voice: 'Nec_24000'
+        },
+        recognizer: {
+          vendor: 'custom:Sber Stream',
+          language: 'ru-RU'
+        }
+      })
       .say({ text: 'Здравствуйте! Меня зовут Анна из ресторана Золотой Дракон. Хотели бы вы забронировать столик?' })
       .gather({
         input: ['speech'],
@@ -234,7 +245,7 @@ service.on('session:new', (session) => {
       .hangup()
       .send();
 
-    log.info('Приветствие отправлено');
+    log.info({ result }, 'Приветствие отправлено');
   } catch (err) {
     log.error({ err }, 'Ошибка при отправке приветствия');
   }
