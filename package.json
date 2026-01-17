@@ -1,0 +1,18 @@
+{
+  "name": "jambonz-restaurant-bot-ws",
+  "version": "1.0.0",
+  "description": "Голосовой бот для бронирования столиков с OpenAI GPT (WebSocket версия)",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js"
+  },
+  "dependencies": {
+    "@jambonz/node-client": "^0.4.11",
+    "@jambonz/node-client-ws": "^0.2.13",
+    "dotenv": "^16.3.1",
+    "openai": "^4.77.0",
+    "pino": "^8.17.0",
+    "pino-pretty": "^10.3.0"
+  }
+}
