@@ -1,8 +1,8 @@
 /**
- * Restaurant Bot - WebSocket версия
+ * Restaurant Bot - WebSocket версия с TTS Streaming
  *
  * Голосовой бот для бронирования столиков.
- * Использует jambonz WebSocket API вместо HTTP webhooks.
+ * Использует jambonz WebSocket API с TTS streaming.
  */
 require('dotenv').config();
 
@@ -109,6 +109,25 @@ function isEndPhrase(text) {
   return END_PHRASES.some(phrase => lower.includes(phrase));
 }
 
+/**
+ * Отправить текст через TTS streaming
+ */
+async function sayWithStreaming(session, text, log) {
+  log.info({ text }, 'TTS streaming: отправляем текст');
+
+  try {
+    // Отправляем весь текст как один chunk
+    session.sendTtsTokens(text);
+
+    // Запускаем синтез
+    session.flushTtsTokens();
+
+    log.info('TTS streaming: flush отправлен');
+  } catch (err) {
+    log.error({ err }, 'TTS streaming ошибка');
+  }
+}
+
 // Создаём HTTP сервер
 const server = createServer();
 
@@ -123,14 +142,13 @@ service.on('session:new', (session) => {
   const log = logger.child({ callSid });
 
   log.info('Новый звонок');
-  log.info({ sessionMethods: Object.keys(session) }, 'Доступные методы session');
 
   // Сохраняем логгер в сессии
   session.locals = { logger: log };
 
   // Обработчик распознанной речи
-  session.on('/speech', async (evt) => {
-    log.info({ evt }, 'Получена речь');
+  session.on('/speech-detected', async (evt) => {
+    log.info('Получена речь');
 
     // Извлекаем транскрипт
     let transcript = '';
@@ -140,31 +158,25 @@ service.on('session:new', (session) => {
 
     log.info({ transcript }, 'Транскрипт');
 
-    // Пустой транскрипт
+    // Отвечаем на webhook чтобы jambonz продолжил
+    session.reply();
+
+    // Пустой транскрипт - игнорируем
     if (!transcript.trim()) {
-      log.info('Пустой транскрипт, просим повторить');
-      session
-        .say({ text: 'Извините, не расслышал. Повторите, пожалуйста.' })
-        .gather({
-          input: ['speech'],
-          actionHook: '/speech',
-          timeout: 10
-        })
-        .say({ text: 'К сожалению, связь плохая. Перезвоню позже. До свидания!' })
-        .hangup()
-        .reply();
       return;
     }
 
     // Проверяем на завершение разговора
     if (isEndPhrase(transcript)) {
-      log.info('Завершение разговора по фразе');
+      log.info('Завершение разговора');
       conversations.delete(callSid);
 
-      session
-        .say({ text: 'Спасибо за ваше время! Хорошего дня, до свидания!' })
-        .hangup()
-        .reply();
+      await sayWithStreaming(session, 'Спасибо за ваше время! Хорошего дня, до свидания!', log);
+
+      // Даём время на проигрывание и завершаем
+      setTimeout(() => {
+        session.hangup().send();
+      }, 3000);
       return;
     }
 
@@ -176,27 +188,26 @@ service.on('session:new', (session) => {
       log.info('Бронь подтверждена');
       conversations.delete(callSid);
 
-      session
-        .say({ text: aiResponse })
-        .pause({ length: 1 })
-        .say({ text: 'До свидания!' })
-        .hangup()
-        .reply();
+      await sayWithStreaming(session, aiResponse + ' До свидания!', log);
+
+      setTimeout(() => {
+        session.hangup().send();
+      }, 5000);
       return;
     }
 
-    // Продолжаем разговор
-    log.info('Отправляем ответ и продолжаем gather');
-    session
-      .say({ text: aiResponse })
-      .gather({
-        input: ['speech'],
-        actionHook: '/speech',
-        timeout: 10
-      })
-      .say({ text: 'Извините, я вас потерял. Перезвоню позже. До свидания!' })
-      .hangup()
-      .reply();
+    // Отправляем ответ через TTS streaming
+    await sayWithStreaming(session, aiResponse, log);
+  });
+
+  // Обработчик событий TTS streaming
+  session.on('tts:streaming-event', (evt) => {
+    log.info({ evt }, 'TTS streaming event');
+  });
+
+  // Обработчик прерывания пользователем
+  session.on('tts:user_interrupt', () => {
+    log.info('Пользователь прервал речь');
   });
 
   // Обработчик статуса звонка
@@ -219,35 +230,36 @@ service.on('session:new', (session) => {
     log.error({ err }, 'Ошибка сессии');
   });
 
-  // Отправляем приветствие сразу (без await)
-  log.info('Отправляем статическое приветствие');
+  // Настраиваем TTS streaming и bargeIn
+  log.info('Настраиваем сессию с TTS streaming');
 
   try {
-    const result = session
+    session
       .config({
-        synthesizer: {
-          vendor: 'custom:Sber Stream',
-          language: 'ru-RU',
-          voice: 'Nec_24000'
+        ttsStream: {
+          enable: true
         },
-        recognizer: {
-          vendor: 'custom:Sber Stream',
-          language: 'ru-RU'
+        bargeIn: {
+          enable: true,
+          sticky: true,
+          minBargeinWordCount: 1,
+          actionHook: '/speech-detected',
+          input: ['speech']
         }
       })
-      .say({ text: 'Здравствуйте! Меня зовут Анна из ресторана Золотой Дракон. Хотели бы вы забронировать столик?' })
-      .gather({
-        input: ['speech'],
-        actionHook: '/speech',
-        timeout: 10
-      })
-      .say({ text: 'Я вас не слышу. Перезвоню позже. До свидания!' })
-      .hangup()
       .send();
 
-    log.info({ result }, 'Приветствие отправлено');
+    log.info('Конфигурация отправлена');
+
+    // Отправляем приветствие через streaming
+    const greeting = 'Здравствуйте! Меня зовут Анна из ресторана Золотой Дракон. Хотели бы вы забронировать столик?';
+
+    setTimeout(() => {
+      sayWithStreaming(session, greeting, log);
+    }, 500);
+
   } catch (err) {
-    log.error({ err }, 'Ошибка при отправке приветствия');
+    log.error({ err }, 'Ошибка при настройке сессии');
   }
 });
 
