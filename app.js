@@ -8,7 +8,6 @@ require('dotenv').config();
 
 const { createServer } = require('http');
 const { createEndpoint } = require('@jambonz/node-client-ws');
-const { WebhookResponse } = require('@jambonz/node-client');
 const OpenAI = require('openai');
 const pino = require('pino');
 
@@ -142,8 +141,7 @@ service.on('session:new', async (session) => {
 
     // Пустой транскрипт
     if (!transcript.trim()) {
-      const app = new WebhookResponse();
-      app
+      session
         .say({ text: 'Извините, не расслышал. Повторите, пожалуйста.' })
         .gather({
           input: ['speech'],
@@ -151,9 +149,8 @@ service.on('session:new', async (session) => {
           timeout: 10
         })
         .say({ text: 'К сожалению, связь плохая. Перезвоню позже. До свидания!' })
-        .hangup();
-
-      session.reply(app);
+        .hangup()
+        .reply();
       return;
     }
 
@@ -161,12 +158,10 @@ service.on('session:new', async (session) => {
     if (isEndPhrase(transcript)) {
       conversations.delete(callSid);
 
-      const app = new WebhookResponse();
-      app
+      session
         .say({ text: 'Спасибо за ваше время! Хорошего дня, до свидания!' })
-        .hangup();
-
-      session.reply(app);
+        .hangup()
+        .reply();
       return;
     }
 
@@ -177,20 +172,17 @@ service.on('session:new', async (session) => {
     if (isBookingConfirmed(aiResponse)) {
       conversations.delete(callSid);
 
-      const app = new WebhookResponse();
-      app
+      session
         .say({ text: aiResponse })
         .pause({ length: 1 })
         .say({ text: 'До свидания!' })
-        .hangup();
-
-      session.reply(app);
+        .hangup()
+        .reply();
       return;
     }
 
     // Продолжаем разговор
-    const app = new WebhookResponse();
-    app
+    session
       .say({ text: aiResponse })
       .gather({
         input: ['speech'],
@@ -198,9 +190,8 @@ service.on('session:new', async (session) => {
         timeout: 10
       })
       .say({ text: 'Извините, я вас потерял. Перезвоню позже. До свидания!' })
-      .hangup();
-
-    session.reply(app);
+      .hangup()
+      .reply();
   });
 
   // Обработчик статуса звонка
@@ -227,9 +218,10 @@ service.on('session:new', async (session) => {
     // Получаем приветствие от AI
     const greeting = await getAIResponse(callSid, null);
 
+    log.info({ greeting }, 'Отправляем приветствие');
+
     // Отправляем начальное приложение
-    const app = new WebhookResponse();
-    app
+    session
       .say({ text: greeting })
       .gather({
         input: ['speech'],
@@ -237,9 +229,8 @@ service.on('session:new', async (session) => {
         timeout: 10
       })
       .say({ text: 'Я вас не слышу. Перезвоню позже. До свидания!' })
-      .hangup();
-
-    session.send(app);
+      .hangup()
+      .send();
 
   } catch (err) {
     log.error({ err }, 'Ошибка при начале звонка');
